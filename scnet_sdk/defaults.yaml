@@ -54,3 +54,50 @@ statuses:
     - stop
     - canceled
     - cancelled
+
+# 日志系统（log4j 风格）
+#
+# 默认不接管输出：不添加 handler，仅向 root logger 传播（propagate），
+# 这样宿主框架（uvicorn / FastAPI / Django / Celery ...）的日志配置直接生效。
+# 需要独立输出时调用 scnet_sdk.configure_logging() 或在此/用户态配置中开启 console/file。
+logging:
+  # 包根级别：CRITICAL / ERROR / WARNING / INFO / DEBUG（可用 WARN、FATAL 别名）
+  level: WARNING
+  # 日志消息语言：内置 zh_CN、en_US；也可用 catalog 指向自定义语言目录
+  language: zh_CN
+  # 默认格式：text（人读）或 json（结构化，字段化输出，便于采集）
+  format: text
+  # 是否向 root logger 传播（框架集成的关键开关，一般保持 true）
+  propagate: true
+  # 是否自动对 token / AK / SK / signature 等敏感字段打码
+  mask_secrets: true
+  timestamp_format: "%Y-%m-%d %H:%M:%S"
+  # 自定义语言包目录或文件（可选），用于扩展/覆盖内置语言
+  catalog: null
+
+  # —— 常用输出目标快捷方式（handlers 为空时生效）——
+  console: false
+  console_stream: stderr      # stdout | stderr
+  file: null                  # 例如 logs/scnet.log
+  file_max_bytes: 10485760    # 10 MiB 轮转
+  file_backup_count: 5
+
+  # —— 完整自定义输出目标（非空时优先于上面的快捷方式）——
+  # handlers:
+  #   - type: console
+  #     format: text
+  #     level: INFO
+  #     stream: stderr
+  #   - type: file
+  #     path: logs/scnet.log
+  #     format: json
+  #     max_bytes: 10485760
+  #     backup_count: 5
+  handlers: []
+
+  # —— 分级 logger（log4j 的 logger 层级）——
+  # loggers:
+  #   scnet_sdk.client: DEBUG
+  #   scnet_sdk.aclient: DEBUG
+  #   scnet_sdk.auth: INFO
+  loggers: {}

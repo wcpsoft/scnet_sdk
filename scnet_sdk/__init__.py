@@ -51,6 +51,8 @@ from .config import (
     ENV_PREFIX,
     PACKAGED_DEFAULTS_NAME,
     Endpoints,
+    LogHandlerConfig,
+    LoggingConfig,
     Paths,
     ScnetConfig,
     StatusSets,
@@ -58,6 +60,7 @@ from .config import (
     deep_merge,
     env_layer,
     load_yaml,
+    logging_config_from_mapping,
     packaged_defaults,
     resolve_config_path,
     search_paths,
@@ -74,6 +77,29 @@ from .errors import (
     ScnetTransportError,
     ScnetValidationError,
     describe_code,
+)
+from .logging import (
+    ROOT_LOGGER_NAME,
+    JsonFormatter,
+    TextFormatter,
+    available_languages,
+    bind_context,
+    build_formatter,
+    clear_context,
+    configure_logging,
+    current_context,
+    current_language,
+    get_logger,
+    is_configured,
+    load_catalog,
+    log_context,
+    log_event,
+    logging_config_dict,
+    mask_fields,
+    render_event,
+    reset_logging,
+    resolve_logging_config,
+    set_language,
 )
 from .models import (
     ACCELERATOR_TYPES,
@@ -92,7 +118,7 @@ from .models import (
     status_matches,
 )
 
-__version__ = '0.3.0'
+__version__ = '0.4.0'
 
 __all__ = [
     # 客户端（同步 / 异步）
@@ -107,6 +133,31 @@ __all__ = [
     'Paths',
     'Timeouts',
     'StatusSets',
+    'LoggingConfig',
+    'LogHandlerConfig',
+    'logging_config_from_mapping',
+    # 日志（log4j 风格 + 多语言）
+    'configure_logging',
+    'logging_config_dict',
+    'resolve_logging_config',
+    'reset_logging',
+    'is_configured',
+    'get_logger',
+    'log_event',
+    'log_context',
+    'bind_context',
+    'clear_context',
+    'current_context',
+    'current_language',
+    'set_language',
+    'available_languages',
+    'load_catalog',
+    'render_event',
+    'mask_fields',
+    'build_formatter',
+    'TextFormatter',
+    'JsonFormatter',
+    'ROOT_LOGGER_NAME',
     'CODE_DEFAULTS',
     'ENV_OVERRIDES',
     'ENV_PREFIX',

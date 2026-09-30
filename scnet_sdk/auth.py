@@ -21,6 +21,9 @@ import httpx
 
 from ._http import DEFAULT_TIMEOUT, api_request, api_request_async
 from .errors import ScnetAuthError, ScnetConfigError
+from .logging import DEBUG, INFO, get_logger, log_event
+
+_LOGGER = get_logger('auth')
 
 DEFAULT_TOKEN_URL = 'https://api.scnet.cn/api/user/v3/tokens'
 DEFAULT_CENTER_URL = 'https://www.scnet.cn/ac/openapi/v2/center'
@@ -276,9 +279,12 @@ def fetch_tokens(
     headers = build_token_headers(
         user, access_key, secret_key, timestamp=timestamp, compact=compact
     )
+    log_event(_LOGGER, DEBUG, 'auth.token.start', user=user, timestamp=headers['timestamp'])
     with _borrowed_client(client) as http:
         data = api_request(http, 'POST', token_url, headers=headers, timeout=timeout)
-    return parse_cluster_tokens(data)
+    tokens = parse_cluster_tokens(data)
+    log_event(_LOGGER, INFO, 'auth.token.ok', count=len(tokens))
+    return tokens
 
 
 def fetch_center(
@@ -292,9 +298,18 @@ def fetch_center(
     if not token:
         raise ScnetConfigError('获取授权区域需要 token')
     headers = {'token': token, 'Content-Type': 'application/json'}
+    log_event(_LOGGER, DEBUG, 'auth.center.start')
     with _borrowed_client(client) as http:
         data = api_request(http, 'GET', center_url, headers=headers, timeout=timeout)
-    return parse_center_data(data)
+    center = parse_center_data(data)
+    log_event(
+        _LOGGER,
+        INFO,
+        'auth.center.ok',
+        name=center.get('name'),
+        ai_url=next((url for url in pick_ai_urls(center) if '{' not in url), None),
+    )
+    return center
 
 
 def obtain_credentials(
@@ -323,7 +338,16 @@ def obtain_credentials(
     center = fetch_center(
         cluster.token or '', center_url=center_url, timeout=timeout, client=client
     )
-    return build_credentials(cluster, center)
+    credentials = build_credentials(cluster, center)
+    log_event(
+        _LOGGER,
+        INFO,
+        'auth.ok',
+        cluster_id=credentials.cluster_id,
+        cluster_name=credentials.cluster_name,
+        ai_url=credentials.ai_url,
+    )
+    return credentials
 
 
 # ------------------------------------------------------------------ 异步流程
@@ -342,9 +366,12 @@ async def fetch_tokens_async(
     headers = build_token_headers(
         user, access_key, secret_key, timestamp=timestamp, compact=compact
     )
+    log_event(_LOGGER, DEBUG, 'auth.token.start', user=user, timestamp=headers['timestamp'])
     async with _borrowed_async_client(client) as http:
         data = await api_request_async(http, 'POST', token_url, headers=headers, timeout=timeout)
-    return parse_cluster_tokens(data)
+    tokens = parse_cluster_tokens(data)
+    log_event(_LOGGER, INFO, 'auth.token.ok', count=len(tokens))
+    return tokens
 
 
 async def fetch_center_async(
@@ -358,9 +385,18 @@ async def fetch_center_async(
     if not token:
         raise ScnetConfigError('获取授权区域需要 token')
     headers = {'token': token, 'Content-Type': 'application/json'}
+    log_event(_LOGGER, DEBUG, 'auth.center.start')
     async with _borrowed_async_client(client) as http:
         data = await api_request_async(http, 'GET', center_url, headers=headers, timeout=timeout)
-    return parse_center_data(data)
+    center = parse_center_data(data)
+    log_event(
+        _LOGGER,
+        INFO,
+        'auth.center.ok',
+        name=center.get('name'),
+        ai_url=next((url for url in pick_ai_urls(center) if '{' not in url), None),
+    )
+    return center
 
 
 async def obtain_credentials_async(
@@ -389,4 +425,13 @@ async def obtain_credentials_async(
     center = await fetch_center_async(
         cluster.token or '', center_url=center_url, timeout=timeout, client=client
     )
-    return build_credentials(cluster, center)
+    credentials = build_credentials(cluster, center)
+    log_event(
+        _LOGGER,
+        INFO,
+        'auth.ok',
+        cluster_id=credentials.cluster_id,
+        cluster_name=credentials.cluster_name,
+        ai_url=credentials.ai_url,
+    )
+    return credentials

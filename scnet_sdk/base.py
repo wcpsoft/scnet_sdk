@@ -19,6 +19,7 @@ from .errors import (
     ScnetTimeoutError,
     ScnetValidationError,
 )
+from .logging import DEBUG, get_logger, log_event
 from .models import SCRIPT_ACTION_SCOPES, ContainerInfo, ContainerSpec, ResourceLimits
 
 ContainerIdOrIds = Union[str, Iterable[str]]
@@ -134,6 +135,9 @@ class ScnetClientBase:
     - `refresh_credentials()`：重新认证
     """
 
+    #: 日志 logger 名（`scnet_sdk.<LOGGER_NAME>`）
+    LOGGER_NAME = 'client'
+
     def __init__(
         self,
         config: Optional[ScnetConfig] = None,
@@ -165,6 +169,15 @@ class ScnetClientBase:
         )
         self.token: Optional[str] = self.config.token
         self._ai_url = normalize_ai_url(self.config.ai_url) if self.config.ai_url else None
+        self._logger = get_logger(self.LOGGER_NAME)
+        log_event(self._logger, DEBUG, 'client.init', ai_url=self._ai_url)
+        log_event(
+            self._logger,
+            DEBUG,
+            'config.loaded',
+            language=self.config.logging.language,
+            sources=' -> '.join(self.config.sources) or '(未记录)',
+        )
 
     # ------------------------------------------------------------ 配置快捷访问
     @property

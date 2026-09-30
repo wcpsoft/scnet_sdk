@@ -53,6 +53,23 @@ CODE_DEFAULTS: Dict[str, Any] = {
             'failed', 'failure', 'error', 'stopped', 'stop', 'canceled', 'cancelled',
         ],
     },
+    # 日志系统（log4j 风格）：级别、语言、handler 与分级 logger
+    'logging': {
+        'level': 'WARNING',
+        'language': 'zh_CN',
+        'format': 'text',
+        'propagate': True,
+        'mask_secrets': True,
+        'timestamp_format': '%Y-%m-%d %H:%M:%S',
+        'catalog': None,
+        'console': False,
+        'console_stream': 'stderr',
+        'file': None,
+        'file_max_bytes': 10485760,
+        'file_backup_count': 5,
+        'handlers': [],
+        'loggers': {},
+    },
 }
 
 # 用户态字段（凭证与区域等）
@@ -82,12 +99,33 @@ ENV_OVERRIDES: Mapping[str, Tuple[str, ...]] = {
     'SCNET_POLL_INTERVAL': ('timeouts', 'poll_interval'),
     'SCNET_RUNNING_STATUSES': ('statuses', 'running'),
     'SCNET_TERMINAL_STATUSES': ('statuses', 'terminal'),
+    'SCNET_LOG_LEVEL': ('logging', 'level'),
+    'SCNET_LOG_LANGUAGE': ('logging', 'language'),
+    'SCNET_LOG_FORMAT': ('logging', 'format'),
+    'SCNET_LOG_PROPAGATE': ('logging', 'propagate'),
+    'SCNET_LOG_CONSOLE': ('logging', 'console'),
+    'SCNET_LOG_CONSOLE_STREAM': ('logging', 'console_stream'),
+    'SCNET_LOG_FILE': ('logging', 'file'),
+    'SCNET_LOG_CATALOG': ('logging', 'catalog'),
+    'SCNET_LOG_TIMESTAMP_FORMAT': ('logging', 'timestamp_format'),
 }
 
+# `logging` 段含 handler 列表与 logger 映射，结构较复杂，单独校验
 _SECTION_FIELDS: Mapping[str, Tuple[str, ...]] = {
     section: tuple(str(key) for key in mapping)
     for section, mapping in CODE_DEFAULTS.items()
+    if section != 'logging'
 }
+
+_LOGGING_FIELDS: Tuple[str, ...] = tuple(str(key) for key in CODE_DEFAULTS['logging'])
+_HANDLER_FIELDS: Tuple[str, ...] = (
+    'type', 'format', 'level', 'stream', 'path', 'max_bytes', 'backup_count', 'encoding',
+)
+_HANDLER_TYPES: Tuple[str, ...] = ('console', 'file')
+_LOG_FORMATS: Tuple[str, ...] = ('text', 'json')
+_CONSOLE_STREAMS: Tuple[str, ...] = ('stdout', 'stderr')
+_LOG_LEVELS: Tuple[str, ...] = ('CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET')
+_LOG_LEVEL_ALIASES: Mapping[str, str] = {'WARN': 'WARNING', 'FATAL': 'CRITICAL'}
 
 _TRUE_WORDS = {'1', 'true', 'yes', 'y', 'on'}
 
@@ -301,6 +339,108 @@ class StatusSets:
     )
 
 
+@dataclass(frozen=True)
+class LogHandlerConfig:
+    """单个日志输出目标（log4j 的 appender）。
+
+    - `type=console`：输出到 `stream`（stdout/stderr）
+    - `type=file`：输出到 `path`，按 `max_bytes` / `backup_count` 轮转
+    - `format`：`text`（人读）或 `json`（机器解析、字段化）
+    - `level`：留空则继承全局 `LoggingConfig.level`
+    """
+
+    type: str = 'console'
+    format: str = 'text'
+    level: Optional[str] = None
+    stream: str = 'stderr'
+    path: Optional[str] = None
+    max_bytes: int = 10 * 1024 * 1024
+    backup_count: int = 5
+    encoding: str = 'utf-8'
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': self.type,
+            'format': self.format,
+            'level': self.level,
+            'stream': self.stream,
+            'path': self.path,
+            'max_bytes': self.max_bytes,
+            'backup_count': self.backup_count,
+            'encoding': self.encoding,
+        }
+
+
+@dataclass(frozen=True)
+class LoggingConfig:
+    """日志系统配置（log4j 风格的 logger 树 + appender + 多语言消息目录）。
+
+    - `level`：`scnet_sdk` 包根级别；`loggers` 可对子 logger 单独降/升级
+    - `language`：日志消息语言（`zh_CN` / `en_US`，或 `catalog` 提供的自定义语言）
+    - `propagate`：是否向 root logger 传播；保持 True 可与宿主框架（uvicorn /
+      FastAPI / Django / Celery 等）的日志配置共存
+    - `console` / `file`：常用输出目标的快捷方式
+    - `handlers`：完整自定义的 handler 列表，非空时优先于上面两个快捷项
+    """
+
+    level: str = 'WARNING'
+    language: str = 'zh_CN'
+    format: str = 'text'
+    propagate: bool = True
+    mask_secrets: bool = True
+    timestamp_format: str = '%Y-%m-%d %H:%M:%S'
+    catalog: Optional[str] = None
+    console: bool = False
+    console_stream: str = 'stderr'
+    file: Optional[str] = None
+    file_max_bytes: int = 10 * 1024 * 1024
+    file_backup_count: int = 5
+    handlers: Tuple[LogHandlerConfig, ...] = ()
+    loggers: Mapping[str, str] = field(default_factory=dict)
+
+    def resolved_handlers(self) -> Tuple[LogHandlerConfig, ...]:
+        """展开最终使用的 handler 列表。
+
+        快捷方式生成的 handler 不设置自身级别（NOTSET），过滤完全交给 logger 层级，
+        这与 log4j「appender 不额外过滤」的语义一致；需要单独过滤时请在
+        `handlers` 中显式写 `level`。
+        """
+        if self.handlers:
+            return tuple(self.handlers)
+        resolved = []
+        if self.console:
+            resolved.append(LogHandlerConfig(
+                type='console', format=self.format, stream=self.console_stream
+            ))
+        if self.file:
+            resolved.append(LogHandlerConfig(
+                type='file',
+                format=self.format,
+                path=self.file,
+                max_bytes=self.file_max_bytes,
+                backup_count=self.file_backup_count,
+            ))
+        return tuple(resolved)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'level': self.level,
+            'language': self.language,
+            'format': self.format,
+            'propagate': self.propagate,
+            'mask_secrets': self.mask_secrets,
+            'timestamp_format': self.timestamp_format,
+            'catalog': self.catalog,
+            'console': self.console,
+            'console_stream': self.console_stream,
+            'file': self.file,
+            'file_max_bytes': self.file_max_bytes,
+            'file_backup_count': self.file_backup_count,
+            'handlers': [item.to_dict() for item in self.handlers],
+            'loggers': dict(self.loggers),
+        }
+
+
 def _mask(value: Optional[str]) -> str:
     if not value:
         return '(未设置)'
@@ -318,6 +458,7 @@ class ScnetConfig:
     paths: Paths = field(default_factory=Paths)
     timeouts: Timeouts = field(default_factory=Timeouts)
     statuses: StatusSets = field(default_factory=StatusSets)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
     # 用户态
     cluster_id: Optional[str] = None
@@ -382,7 +523,7 @@ class ScnetConfig:
         """由已合并的映射构建配置对象，并做键名与取值校验。"""
         mapping = dict(mapping or {})
 
-        allowed = set(_SECTION_FIELDS) | set(USER_FIELDS)
+        allowed = set(_SECTION_FIELDS) | set(USER_FIELDS) | {'logging'}
         unknown = sorted(set(mapping) - allowed)
         if unknown:
             raise ScnetConfigError(
@@ -425,12 +566,14 @@ class ScnetConfig:
             running=_status_tuple(sections['statuses'], 'running', required=True),
             terminal=_status_tuple(sections['statuses'], 'terminal', required=False),
         )
+        logging_config = logging_config_from_mapping(mapping.get('logging') or {})
 
         return cls(
             endpoints=endpoints,
             paths=paths,
             timeouts=timeouts,
             statuses=statuses,
+            logging=logging_config,
             cluster_id=_optional_text(mapping.get('cluster_id')),
             ai_url=_optional_text(mapping.get('ai_url')),
             user=_optional_text(mapping.get('user')),
@@ -458,6 +601,9 @@ class ScnetConfig:
         poll_interval: Optional[float] = None,
         running_statuses: Optional[Sequence[str]] = None,
         terminal_statuses: Optional[Sequence[str]] = None,
+        log_level: Optional[str] = None,
+        log_language: Optional[str] = None,
+        log_format: Optional[str] = None,
     ) -> 'ScnetConfig':
         """返回覆盖了指定字段的新配置（None 表示保持原值）。"""
         changes: Dict[str, Any] = {}
@@ -494,6 +640,16 @@ class ScnetConfig:
         if status_changes:
             config = replace(config, statuses=replace(config.statuses, **status_changes))
 
+        log_changes: Dict[str, Any] = {}
+        if log_level is not None:
+            log_changes['level'] = _validate_log_level(log_level, 'log_level')
+        if log_language is not None:
+            log_changes['language'] = str(log_language)
+        if log_format is not None:
+            log_changes['format'] = _validate_choice('log_format', log_format, _LOG_FORMATS)
+        if log_changes:
+            config = replace(config, logging=replace(config.logging, **log_changes))
+
         return config
 
     # ------------------------------------------------------------------ 输出
@@ -519,6 +675,7 @@ class ScnetConfig:
                 'running': list(self.statuses.running),
                 'terminal': list(self.statuses.terminal),
             },
+            'logging': self.logging.to_dict(),
             'cluster_id': self.cluster_id,
             'ai_url': self.ai_url,
             'user': self.user,
@@ -544,6 +701,9 @@ class ScnetConfig:
             f'        detail={self.paths.detail}',
             f'  运行态: {list(self.statuses.running)}',
             f'  终态: {list(self.statuses.terminal)}',
+            f'  日志: 级别={self.logging.level} 语言={self.logging.language} '
+            f'格式={self.logging.format} 传播={self.logging.propagate}',
+            f'        输出={_describe_handlers(self.logging)}',
         ]
         return '\n'.join(lines)
 
@@ -584,3 +744,128 @@ def _status_tuple(section: Mapping[str, Any], key: str, *, required: bool) -> Tu
     if required and not cleaned:
         raise ScnetConfigError(f'配置项 statuses.{key} 不能为空')
     return cleaned
+
+
+# --------------------------------------------------------------- 日志配置构建
+def _validate_choice(name: str, value: Any, choices: Sequence[str]) -> str:
+    text = str(value).strip()
+    if text.lower() not in {item.lower() for item in choices}:
+        raise ScnetConfigError(f'配置项 {name}={value!r} 非法；可选: {list(choices)}')
+    return text
+
+
+def _validate_log_level(value: Any, source: str) -> str:
+    text = str(value).strip().upper()
+    if not text:
+        raise ScnetConfigError(f'配置项 {source} 不能为空')
+    text = _LOG_LEVEL_ALIASES.get(text, text)
+    if text not in _LOG_LEVELS:
+        raise ScnetConfigError(
+            f'配置项 {source} 不是合法的日志级别: {value!r}；可选: {list(_LOG_LEVELS)}'
+        )
+    return text
+
+
+def _int_value(
+    section: Mapping[str, Any], key: str, fallback: int, source: str, *, minimum: int = 0
+) -> int:
+    value = section.get(key, fallback)
+    if value is None:
+        value = fallback
+    number = int(_coerce_like(int(fallback), value, f'{source}.{key}'))
+    if number < minimum:
+        raise ScnetConfigError(f'配置项 {source}.{key} 不能小于 {minimum}，收到 {number}')
+    return number
+
+
+def _build_handler_config(raw: Any, index: int) -> LogHandlerConfig:
+    source = f'logging.handlers[{index}]'
+    if not isinstance(raw, Mapping):
+        raise ScnetConfigError(f'{source} 必须是映射(mapping)')
+
+    extra = sorted(set(raw) - set(_HANDLER_FIELDS))
+    if extra:
+        raise ScnetConfigError(
+            f'{source} 存在未知键 {extra}；可用键: {list(_HANDLER_FIELDS)}'
+        )
+
+    handler_type = _validate_choice(f'{source}.type', raw.get('type', 'console'), _HANDLER_TYPES).lower()
+    path = _optional_text(raw.get('path'))
+    if handler_type == 'file' and not path:
+        raise ScnetConfigError(f'{source} 为 file 类型时必须提供 path')
+
+    level = raw.get('level')
+    return LogHandlerConfig(
+        type=handler_type,
+        format=_validate_choice(f'{source}.format', raw.get('format', 'text'), _LOG_FORMATS).lower(),
+        level=_validate_log_level(level, f'{source}.level') if level else None,
+        stream=_validate_choice(
+            f'{source}.stream', raw.get('stream', 'stderr'), _CONSOLE_STREAMS
+        ).lower(),
+        path=path,
+        max_bytes=_int_value(raw, 'max_bytes', 10 * 1024 * 1024, source, minimum=0),
+        backup_count=_int_value(raw, 'backup_count', 5, source, minimum=0),
+        encoding=_optional_text(raw.get('encoding')) or 'utf-8',
+    )
+
+
+def logging_config_from_mapping(mapping: Mapping[str, Any]) -> LoggingConfig:
+    """由映射构建日志配置。
+
+    YAML 的 `logging:` 段与外部字典两种入口共用，因此单独导出。
+    """
+    mapping = dict(mapping or {})
+    extra = sorted(set(mapping) - set(_LOGGING_FIELDS))
+    if extra:
+        raise ScnetConfigError(
+            f'配置段 logging 存在未知键 {extra}；可用键: {list(_LOGGING_FIELDS)}'
+        )
+
+    raw_handlers = mapping.get('handlers') or ()
+    if isinstance(raw_handlers, (str, bytes, Mapping)):
+        raise ScnetConfigError('配置项 logging.handlers 必须是列表')
+    handlers = tuple(
+        _build_handler_config(item, index) for index, item in enumerate(raw_handlers)
+    )
+
+    raw_loggers = mapping.get('loggers') or {}
+    if not isinstance(raw_loggers, Mapping):
+        raise ScnetConfigError('配置项 logging.loggers 必须是映射(mapping)：{logger 名称: 级别}')
+    loggers = {
+        str(name): _validate_log_level(level, f'logging.loggers.{name}')
+        for name, level in raw_loggers.items()
+        if level is not None
+    }
+
+    return LoggingConfig(
+        level=_validate_log_level(mapping.get('level', 'WARNING'), 'logging.level'),
+        language=_optional_text(mapping.get('language')) or 'zh_CN',
+        format=_validate_choice(
+            'logging.format', mapping.get('format', 'text'), _LOG_FORMATS
+        ).lower(),
+        propagate=bool(_coerce_like(True, mapping.get('propagate', True), 'logging.propagate')),
+        mask_secrets=bool(
+            _coerce_like(True, mapping.get('mask_secrets', True), 'logging.mask_secrets')
+        ),
+        timestamp_format=_optional_text(mapping.get('timestamp_format')) or '%Y-%m-%d %H:%M:%S',
+        catalog=_optional_text(mapping.get('catalog')),
+        console=bool(_coerce_like(False, mapping.get('console', False), 'logging.console')),
+        console_stream=_validate_choice(
+            'logging.console_stream', mapping.get('console_stream', 'stderr'), _CONSOLE_STREAMS
+        ).lower(),
+        file=_optional_text(mapping.get('file')),
+        file_max_bytes=_int_value(mapping, 'file_max_bytes', 10 * 1024 * 1024, 'logging'),
+        file_backup_count=_int_value(mapping, 'file_backup_count', 5, 'logging'),
+        handlers=handlers,
+        loggers=loggers,
+    )
+
+
+def _describe_handlers(config: LoggingConfig) -> str:
+    handlers = config.resolved_handlers()
+    if not handlers:
+        return '(未配置输出目标，沿用宿主框架日志配置)'
+    return ', '.join(
+        f'{item.type}({item.path or item.stream}/{item.format}/{item.level or "inherit"})'
+        for item in handlers
+    )

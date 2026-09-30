@@ -1,0 +1,43 @@
+# SCNet SDK 日志消息语言包：简体中文
+#
+# 每个 key 是「事件名」，value 是带 {占位符} 的消息模板。
+# 占位符由 log_event(event, **fields) 的字段填充；缺失字段时会在消息后追加原始字段 JSON。
+language: zh_CN
+name: 简体中文
+events:
+  # 客户端与配置
+  client.init: "客户端初始化 ai_url={ai_url}"
+  config.loaded: "配置加载完成 语言={language} 来源={sources}"
+  logging.configured: "日志系统已配置 语言={language} 级别={level} handlers={handlers}"
+  logging.language.missing: "未找到语言包 '{requested}'，已回退到 '{fallback}'"
+  logging.catalog.loaded: "已加载语言包 '{language}' 条目数={count}"
+
+  # HTTP 请求
+  request.start: "请求 {method} {url}"
+  request.finish: "响应 {method} {url} 耗时 {elapsed_ms}ms"
+  request.failed: "请求失败 {method} {url} code={code} 原因={error}"
+
+  # 认证
+  auth.token.start: "获取访问凭证 user={user} timestamp={timestamp}"
+  auth.token.ok: "获取访问凭证成功 区域数={count}"
+  auth.center.start: "获取授权区域"
+  auth.center.ok: "授权区域 '{name}' ai_url={ai_url}"
+  auth.ok: "认证完成 区域={cluster_name}({cluster_id}) ai_url={ai_url}"
+
+  # 资源限额
+  limits.ok: "节点资源限额 分组={resource_group} CPU={cpu_number} GPU={gpu_number} 内存={memory_size}MB 最长运行={max_time}"
+
+  # 容器生命周期
+  container.create.start: "创建容器实例 名称={name} 类型={task_type} 加速器={accelerator_type} CPU={cpu_number} 内存={ram_size}MB GPU={gpu_number}"
+  container.create.ok: "容器实例创建成功 id={container_id}"
+  container.detail: "查询容器详情 id={container_id} 状态={status}"
+  container.wait.poll: "等待容器就绪 第 {attempt} 次 状态={status}"
+  container.wait.ready: "容器已就绪 id={container_id} 状态={status} 耗时={elapsed_ms}ms"
+  container.wait.terminal: "容器进入终态 id={container_id} 状态={status}"
+  container.wait.timeout: "等待容器就绪超时 id={container_id} 上限={wait_limit}s 最后状态={status}"
+  container.script.start: "下发脚本 id={container_id} 范围={scope} 脚本长度={length}"
+  container.script.ok: "脚本下发成功 id={container_id}"
+  container.delete.start: "删除容器 ids={ids}"
+  container.delete.ok: "容器删除请求已提交 数量={count}"
+  container.keep: "保留容器（未自动删除） id={container_id}"
+  container.cleanup.failed: "容器自动删除失败，需手动清理 id={container_id} 原因={error}"

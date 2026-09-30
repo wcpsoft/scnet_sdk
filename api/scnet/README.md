@@ -4,7 +4,7 @@
 
 - 官方文档：<https://www.scnet.cn/ac/openapi/doc/2.0/api/tutorials.html>
 - 本目录文档均整理自官方公开文档，字段名与示例值保持原样。
-- 基于本目录文档实现的 Python 类库封装：[`../../scnet_sdk/`](../../scnet_sdk/)（容器创建 / 状态查询 / 脚本执行 / 删除，含系统态 + 用户态 YAML 配置）。
+- 基于本目录文档实现的 Python 类库封装见仓库根目录 [`README.md`](../../README.md)，代码位于仓库根的 `scnet_sdk/` 包内（容器创建 / 状态查询 / 脚本执行 / 删除，含配置分层、同步+异步客户端与多语言日志）。
 
 ---
 

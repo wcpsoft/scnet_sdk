@@ -1,0 +1,44 @@
+# SCNet SDK log message catalog: English (US)
+#
+# Each key is an event name; the value is a template with {placeholders}
+# filled from log_event(event, **fields). Missing placeholders append the raw
+# fields as JSON so no information is lost.
+language: en_US
+name: English (US)
+events:
+  # Client and configuration
+  client.init: "client initialised ai_url={ai_url}"
+  config.loaded: "configuration loaded language={language} sources={sources}"
+  logging.configured: "logging configured language={language} level={level} handlers={handlers}"
+  logging.language.missing: "catalog for '{requested}' not found, falling back to '{fallback}'"
+  logging.catalog.loaded: "catalog '{language}' loaded entries={count}"
+
+  # HTTP requests
+  request.start: "request {method} {url}"
+  request.finish: "response {method} {url} elapsed={elapsed_ms}ms"
+  request.failed: "request failed {method} {url} code={code} reason={error}"
+
+  # Authentication
+  auth.token.start: "fetching access token user={user} timestamp={timestamp}"
+  auth.token.ok: "access token acquired clusters={count}"
+  auth.center.start: "fetching authorized center"
+  auth.center.ok: "authorized center '{name}' ai_url={ai_url}"
+  auth.ok: "authentication complete cluster={cluster_name}({cluster_id}) ai_url={ai_url}"
+
+  # Resource limits
+  limits.ok: "node resource limits group={resource_group} cpu={cpu_number} gpu={gpu_number} memory={memory_size}MB max_time={max_time}"
+
+  # Container lifecycle
+  container.create.start: "creating container instance name={name} type={task_type} accelerator={accelerator_type} cpu={cpu_number} ram={ram_size}MB gpu={gpu_number}"
+  container.create.ok: "container instance created id={container_id}"
+  container.detail: "container detail id={container_id} status={status}"
+  container.wait.poll: "waiting for container attempt={attempt} status={status}"
+  container.wait.ready: "container ready id={container_id} status={status} elapsed={elapsed_ms}ms"
+  container.wait.terminal: "container reached terminal state id={container_id} status={status}"
+  container.wait.timeout: "timed out waiting for container id={container_id} limit={wait_limit}s last_status={status}"
+  container.script.start: "dispatching script id={container_id} scope={scope} length={length}"
+  container.script.ok: "script dispatched id={container_id}"
+  container.delete.start: "deleting containers ids={ids}"
+  container.delete.ok: "container deletion submitted count={count}"
+  container.keep: "container kept (auto-delete skipped) id={container_id}"
+  container.cleanup.failed: "auto-delete failed, manual cleanup required id={container_id} reason={error}"

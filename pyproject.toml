@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scnet-sdk"
-version = "0.3.0"
-description = "SCNet 开放 API 容器能力 Python SDK（同步 + 异步：创建 / 状态查询 / 执行脚本 / 删除）"
+version = "0.4.0"
+description = "SCNet 开放 API 容器能力 Python SDK（同步 + 异步：创建 / 状态查询 / 执行脚本 / 删除；log4j 风格多语言日志）"
 readme = "README.md"
 requires-python = ">=3.9"
 keywords = ["scnet", "hpc", "container", "openapi", "sdk"]
@@ -34,4 +34,4 @@ packages = ["scnet_sdk"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-scnet_sdk = ["defaults.yaml"]
+scnet_sdk = ["defaults.yaml", "locales/*.yaml"]

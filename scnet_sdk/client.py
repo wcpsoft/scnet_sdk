@@ -48,6 +48,7 @@ from .base import (
 )
 from .config import ScnetConfig
 from .errors import ScnetConfigError, ScnetError, ScnetValidationError
+from .logging import DEBUG, ERROR, INFO, WARNING, log_event
 from .models import ContainerInfo, ContainerSpec, ResourceLimits
 
 
@@ -297,15 +298,39 @@ class ScnetClient(ScnetClientBase):
         json_body: Any = None,
         request_timeout: Optional[float] = None,
     ) -> Any:
-        return api_request(
-            self._http,
-            method,
-            f'{self.ensure_ai_url()}{path}',
-            headers=self._auth_headers(),
-            params=params,
-            json_body=json_body,
-            timeout=self._resolve_timeout(request_timeout),
+        url = f'{self.ensure_ai_url()}{path}'
+        log_event(self._logger, DEBUG, 'request.start', method=method, url=url)
+        started = time.monotonic()
+        try:
+            data = api_request(
+                self._http,
+                method,
+                url,
+                headers=self._auth_headers(),
+                params=params,
+                json_body=json_body,
+                timeout=self._resolve_timeout(request_timeout),
+            )
+        except ScnetError as exc:
+            log_event(
+                self._logger,
+                ERROR,
+                'request.failed',
+                method=method,
+                url=url,
+                code=exc.code or '-',
+                error=exc.message,
+            )
+            raise
+        log_event(
+            self._logger,
+            DEBUG,
+            'request.finish',
+            method=method,
+            url=url,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
         )
+        return data
 
     # ------------------------------------------------------- 资源限额（前置查询）
     def resource_limits(
@@ -327,7 +352,18 @@ class ScnetClient(ScnetClientBase):
             },
             request_timeout=request_timeout,
         )
-        return parse_resource_limits(data)
+        limits = parse_resource_limits(data)
+        log_event(
+            self._logger,
+            INFO,
+            'limits.ok',
+            resource_group=resource_group,
+            cpu_number=limits.cpu_number,
+            gpu_number=limits.gpu_number,
+            memory_size=limits.memory_size,
+            max_time=limits.max_time,
+        )
+        return limits
 
     # ---------------------------------------------------------------- 创建容器
     def create_container(
@@ -337,13 +373,29 @@ class ScnetClient(ScnetClientBase):
         request_timeout: Optional[float] = None,
     ) -> str:
         """创建容器实例，返回容器实例 ID（响应 data）。"""
+        payload = build_create_payload(spec)
+        log_event(
+            self._logger,
+            DEBUG,
+            'container.create.start',
+            name=payload.get('instanceServiceName'),
+            task_type=payload.get('taskType'),
+            accelerator_type=payload.get('acceleratorType'),
+            cpu_number=payload.get('cpuNumber'),
+            ram_size=payload.get('ramSize'),
+            gpu_number=payload.get('gpuNumber'),
+        )
         data = self._send(
             'POST',
             self.paths.task,
-            json_body=build_create_payload(spec),
+            json_body=payload,
             request_timeout=request_timeout,
         )
-        return parse_created_id(data)
+        container_id = parse_created_id(data)
+        log_event(
+            self._logger, INFO, 'container.create.ok', container_id=container_id
+        )
+        return container_id
 
     # ---------------------------------------------------- 查询容器详情/执行状态
     def get_container(
@@ -358,7 +410,15 @@ class ScnetClient(ScnetClientBase):
             self.paths.detail_for(require_container_id(container_id)),
             request_timeout=request_timeout,
         )
-        return parse_container_info(data)
+        info = parse_container_info(data)
+        log_event(
+            self._logger,
+            DEBUG,
+            'container.detail',
+            container_id=container_id,
+            status=info.status,
+        )
+        return info
 
     # 语义别名：容器「执行状态」查询
     get_container_status = get_container
@@ -383,21 +443,53 @@ class ScnetClient(ScnetClientBase):
         running, terminal = self._resolve_statuses(running_statuses, terminal_statuses)
         wait_limit, interval = self._resolve_wait(timeout, poll_interval)
 
-        deadline = time.monotonic() + wait_limit
+        started = time.monotonic()
+        deadline = started + wait_limit
         attempt = 0
         info: Optional[ContainerInfo] = None
         while True:
             attempt += 1
             info = self.get_container(container_id)
+            log_event(
+                self._logger,
+                DEBUG,
+                'container.wait.poll',
+                container_id=container_id,
+                attempt=attempt,
+                status=info.status,
+            )
             if on_poll is not None:
                 on_poll(attempt, info)
             decision = wait_decision(info, running, terminal)
             if decision == WAIT_READY:
+                log_event(
+                    self._logger,
+                    INFO,
+                    'container.wait.ready',
+                    container_id=container_id,
+                    status=info.status,
+                    elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+                )
                 return info
             if decision == WAIT_TERMINAL:
+                log_event(
+                    self._logger,
+                    ERROR,
+                    'container.wait.terminal',
+                    container_id=container_id,
+                    status=info.status,
+                )
                 raise self._state_error(container_id, info)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                log_event(
+                    self._logger,
+                    ERROR,
+                    'container.wait.timeout',
+                    container_id=container_id,
+                    status=info.status,
+                    wait_limit=wait_limit,
+                )
                 raise self._timeout_error(container_id, info, wait_limit)
             time.sleep(min(interval, remaining))
 
@@ -415,12 +507,23 @@ class ScnetClient(ScnetClientBase):
         `script` 中的多行命令请使用真实换行符；文档要求每行以换行符结尾，
         可用 :func:`scnet_sdk.join_script_lines` 生成。
         """
-        return self._send(
+        body = build_script_body(container_id, script, scope)
+        log_event(
+            self._logger,
+            DEBUG,
+            'container.script.start',
+            container_id=container_id,
+            scope=body['startScriptActionScope'],
+            length=len(script),
+        )
+        result = self._send(
             'POST',
             self.paths.execute_script,
-            json_body=build_script_body(container_id, script, scope),
+            json_body=body,
             request_timeout=request_timeout,
         )
+        log_event(self._logger, INFO, 'container.script.ok', container_id=container_id)
+        return result
 
     # ---------------------------------------------------------------- 删除容器
     def delete_containers(
@@ -431,12 +534,17 @@ class ScnetClient(ScnetClientBase):
     ) -> Any:
         """批量删除容器（单个 ID 也走批量接口）。"""
         id_list = normalize_ids(ids)
-        return self._send(
+        log_event(self._logger, INFO, 'container.delete.start', ids=id_list)
+        result = self._send(
             'DELETE',
             self.paths.task,
             params=[('ids', item) for item in id_list],
             request_timeout=request_timeout,
         )
+        log_event(
+            self._logger, INFO, 'container.delete.ok', count=len(id_list)
+        )
+        return result
 
     def delete_container(
         self,
@@ -469,10 +577,19 @@ class ScnetClient(ScnetClientBase):
                 )
             yield handle
         finally:
-            if not keep:
+            if keep:
+                log_event(self._logger, INFO, 'container.keep', container_id=container_id)
+            else:
                 try:
                     self.delete_containers([container_id])
                 except ScnetError as exc:  # 删除失败不掩盖业务异常，仅提示人工清理
+                    log_event(
+                        self._logger,
+                        WARNING,
+                        'container.cleanup.failed',
+                        container_id=container_id,
+                        error=exc.message,
+                    )
                     warnings.warn(
                         f'容器 {container_id} 自动删除失败，请手动清理: {exc}',
                         stacklevel=2,

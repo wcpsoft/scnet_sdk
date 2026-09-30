@@ -2,16 +2,16 @@
 
 SCNet（国家超算互联网）开放 API 的 Python 类库封装，覆盖**容器创建、状态查询（执行状态）、脚本执行与删除**，提供**同步 + 异步（asyncio）双栈**客户端。
 
-接口与字段严格对齐 [`api/scnet/`](../api/scnet/) 目录下的官方文档整理：
+接口与字段严格对齐 [`api/scnet/`](api/scnet/) 目录下的官方文档整理：
 
 | 文档 | 对应能力 |
 |---|---|
-| [`api/scnet/01-authentication.md`](../api/scnet/01-authentication.md) | AK/SK 签名获取 `token`、解析容器服务地址 `aiUrls` |
-| [`api/scnet/02-resources.md`](../api/scnet/02-resources.md) | 查询节点资源限额 |
-| [`api/scnet/03-create-container.md`](../api/scnet/03-create-container.md) | **创建容器实例** |
-| [`api/scnet/04-execute-script.md`](../api/scnet/04-execute-script.md) | 批量执行脚本 |
-| [`api/scnet/05-container-status.md`](../api/scnet/05-container-status.md) | **查询容器实例详情 / 执行状态** |
-| [`api/scnet/06-delete-container.md`](../api/scnet/06-delete-container.md) | 批量删除容器 |
+| [`api/scnet/01-authentication.md`](api/scnet/01-authentication.md) | AK/SK 签名获取 `token`、解析容器服务地址 `aiUrls` |
+| [`api/scnet/02-resources.md`](api/scnet/02-resources.md) | 查询节点资源限额 |
+| [`api/scnet/03-create-container.md`](api/scnet/03-create-container.md) | **创建容器实例** |
+| [`api/scnet/04-execute-script.md`](api/scnet/04-execute-script.md) | 批量执行脚本 |
+| [`api/scnet/05-container-status.md`](api/scnet/05-container-status.md) | **查询容器实例详情 / 执行状态** |
+| [`api/scnet/06-delete-container.md`](api/scnet/06-delete-container.md) | 批量删除容器 |
 
 ## 目录结构（标准 Python 包布局）
 
@@ -21,24 +21,28 @@ scnet_sdk/                     # 项目根
 ├── README.md
 ├── scnet_sdk/                 # 包
 │   ├── __init__.py            # 对外导出
-│   ├── config.py              # 配置加载：系统态 + 用户态
+│   ├── config.py              # 配置加载：系统态 + 用户态（含 logging 段）
 │   ├── defaults.yaml          # 类库系统态配置（随包发布，只读）
 │   ├── auth.py                # AK/SK 签名、获取 token、解析 aiUrls（同步 + 异步）
 │   ├── _http.py               # 请求 / 响应解包（api_request / api_request_async）
 │   ├── base.py                # 同步/异步共享基类与纯逻辑
 │   ├── client.py              # ScnetClient / ContainerHandle（同步）
 │   ├── aclient.py             # AsyncScnetClient / AsyncContainerHandle（asyncio）
+│   ├── logging.py             # log4j 风格日志：层级 logger / handler / 多语言 / 脱敏
+│   ├── locales/               # 日志消息语言包（zh_CN.yaml / en_US.yaml）
 │   ├── models.py              # ContainerSpec / ContainerInfo / ResourceLimits / MountInfo / PortInfo
 │   └── errors.py              # 异常体系 + 官方错误码表
 ├── examples/
-│   ├── scnet.yaml             # 用户态配置示例
+│   ├── scnet.yaml             # 用户态配置示例（含 logging 段）
 │   ├── create_and_wait.py     # 同步：创建 + 等就绪 + 执行 + 删除
 │   ├── create_and_wait_async.py   # 异步：同一流程 + 并发等待示例
+│   ├── logging_setup.py       # 日志：多语言 / JSON / dictConfig 集成
 │   └── query_status.py
 └── tests/
     ├── test_scnet_sdk.py      # 同步客户端与模型用例
     ├── test_async_client.py   # 异步客户端用例（含同步/异步报文一致性）
-    └── test_config.py         # 配置系统用例
+    ├── test_config.py         # 配置系统用例
+    └── test_logging.py        # 日志系统用例（多语言 / 脱敏 / 层级 / dictConfig）
 ```
 
 ## 安装
@@ -265,6 +269,114 @@ infos = await asyncio.gather(
 
 认证侧同样提供异步函数：`fetch_tokens_async` / `fetch_center_async` / `obtain_credentials_async`。
 
+## 日志系统（log4j 风格 + 多语言）
+
+内置 stdlib `logging` 之上的 log4j 式日志子系统：层级 logger、可插拔 handler/formatter、消息目录多语言。
+
+### 设计取舍：默认不接管，显式调用才输出
+
+- **不调用** `configure_logging()` 时：本库保持静默（只挂 `NullHandler`），且 `propagate=True`，因此 uvicorn / FastAPI / Django / Celery 的日志配置会**自动接管**本库日志 —— 这是「任意框架集成」最省事的方式。
+- **调用** `configure_logging()` 时：按配置挂载 handler 独立输出（默认给一个控制台 handler，避免"配了却没输出"的困惑）。
+
+### 快速使用
+
+```python
+import scnet_sdk
+
+# 从配置（系统态 + 用户态 YAML + SCNET_LOG_* 环境变量）初始化
+scnet_sdk.configure_logging()
+
+# 或用参数直接覆盖
+scnet_sdk.configure_logging(level='DEBUG', language='zh_CN', console=True, format='text')
+
+logger = scnet_sdk.get_logger('client')          # → scnet_sdk.client
+scnet_sdk.log_event(logger, logging.INFO, 'container.create.ok', container_id='abc123')
+# 2026-09-30 12:00:00 INFO     scnet_sdk.client | 容器实例创建成功 id=abc123 | container_id=abc123
+```
+
+### 多语言
+
+日志消息不是硬编码字符串，而是「事件名 + 字段」，由 `scnet_sdk/locales/<语言>.yaml` 渲染：
+
+```yaml
+# locales/zh_CN.yaml
+events:
+  container.create.ok: "容器实例创建成功 id={container_id}"
+```
+```yaml
+# locales/en_US.yaml
+events:
+  container.create.ok: "container instance created id={container_id}"
+```
+
+- 内置 `zh_CN`、`en_US`；`logging.language` 或 `SCNET_LOG_LANGUAGE` 切换，运行期可用 `set_language('en_US')`。
+- 自定义语言：`logging.catalog` 指向目录（或单个文件），文件名即语言名，可新增 `fr_FR.yaml` 或覆盖内置 key。
+- 单条日志切换：`log_event(logger, INFO, 'evt', log_language='en_US', ...)`。
+- 语言缺失时回退 `en_US` 并记一条 WARNING；字段缺失时消息后追加原始字段 JSON，不丢信息。
+- JSON 格式额外保留 `event` + `fields`，**与语言无关**，适合日志采集/告警规则。
+
+### 结构化输出与脱敏
+
+```python
+scnet_sdk.configure_logging(format='json', console=True)
+# {"ts":"2026-09-30T12:00:00.123","level":"INFO","logger":"scnet_sdk.client",
+#  "event":"container.create.ok","message":"容器实例创建成功 id=abc123",
+#  "language":"zh_CN","fields":{"container_id":"abc123"}}
+```
+
+`mask_secrets=True`（默认）时，`token` / `access_key` / `secret_key` / `signature` / `cookie` 等 key 一律整体替换为 `***`，消息中出现的 JWT 形态凭证也会被整体打码。
+
+### 请求上下文（跨同步/异步）
+
+```python
+with scnet_sdk.log_context(request_id='req-1', tenant='acme'):
+    client.create_container(spec)     # 该作用域内所有日志自动带上这两个字段
+```
+
+基于 `contextvars`，同步与 asyncio 路径都生效（线程池场景需自行传递）。
+
+### 与宿主框架集成
+
+```python
+# 方式一：什么都不做 —— 让它走宿主框架的 logging 配置（propagate=True）
+# 方式二：并入已有 dictConfig
+import logging.config, scnet_sdk
+
+logging.config.dictConfig({
+    'version': 1,
+    'disable_existing_loggers': False,
+    **scnet_sdk.logging_config_dict(),      # 内含 formatters/handlers/loggers 段
+})
+```
+```python
+# 方式三：本库独立输出，同时不影响应用自身日志
+scnet_sdk.configure_logging(level='INFO', console=True, propagate=True)
+# 或彻底不传播（完全隔离）
+scnet_sdk.configure_logging(level='INFO', file='logs/scnet.log', propagate=False)
+```
+
+`logging_config_dict()` 生成的片段完全符合 `logging.config` 规范（formatter 通过 `scnet_sdk.logging.TextFormatter` / `JsonFormatter` 引用），可直接嵌入 Django `LOGGING`、FastAPI/uvicorn `dictConfig`、Celery `--config` 等既有体系。
+
+### 日志配置项
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `level` | `WARNING` | `scnet_sdk` 根级别（可用 `WARN`/`FATAL` 别名） |
+| `language` | `zh_CN` | 消息语言 |
+| `format` | `text` | `text` / `json` |
+| `propagate` | `true` | 是否向 root logger 传播（框架集成关键开关） |
+| `mask_secrets` | `true` | 凭证脱敏 |
+| `timestamp_format` | `%Y-%m-%d %H:%M:%S` | text 格式时间戳 |
+| `catalog` | `null` | 自定义语言包目录/文件 |
+| `console` / `console_stream` | `false` / `stderr` | 控制台快捷开关 |
+| `file` / `file_max_bytes` / `file_backup_count` | `null` / 10 MiB / 5 | 轮转文件快捷开关 |
+| `handlers` | `[]` | 完整 handler 列表（`type`/`format`/`level`/`stream`/`path`/`max_bytes`/`backup_count`/`encoding`），非空时优先于快捷开关 |
+| `loggers` | `{}` | 分级 logger 级别，如 `{client: DEBUG, auth: INFO}` |
+
+环境变量：`SCNET_LOG_LEVEL`、`SCNET_LOG_LANGUAGE`、`SCNET_LOG_FORMAT`、`SCNET_LOG_CONSOLE`、`SCNET_LOG_CONSOLE_STREAM`、`SCNET_LOG_FILE`、`SCNET_LOG_CATALOG`、`SCNET_LOG_PROPAGATE`、`SCNET_LOG_TIMESTAMP_FORMAT`。
+
+示例见 `examples/logging_setup.py`。
+
 ## 异常体系
 
 | 异常 | 触发场景 |
@@ -314,6 +426,8 @@ client.wait_for_container(cid, running_statuses=('deploying',))
 5. **`open_container` 清理失败不掩盖业务异常**：只发 `warnings.warn`，需人工清理时容器 ID 会在告警中给出。
 6. **凭证脱敏**：`ScnetConfig.describe()` / `ScnetClient.describe_config()` 输出的 AK/SK/token 均已打码，可直接打日志。
 7. **同步/异步不重复实现**：配置解析、请求体构造、响应解析、等待判定等纯逻辑集中在 `base.py`，`client.py` / `aclient.py` 只各自实现传输与轮询；两者共用同一份 `models` / `errors`，因此报文与异常语义天然一致（有专门的一致性用例兜底）。
+8. **日志不劫持应用**：库日志统一走 `scnet_sdk.*` 命名空间，默认只挂 `NullHandler` 并保持 `propagate=True`，因此不会与应用/框架的日志系统打架；`configure_logging()` 是显式的接管动作。
+9. **日志消息与语言解耦**：代码里只写事件名与字段，文案全部在 `locales/*.yaml`；JSON 输出同时保留 `event`/`fields`，因此换语言不影响采集与告警规则。
 
 ## 测试
 
@@ -322,4 +436,4 @@ cd scnet_sdk
 python -m unittest discover -s tests -t . -v
 ```
 
-共 **84** 个用例（同步 60 + 异步 24），全部基于 `httpx.MockTransport` 与临时目录中的 YAML，不发起真实网络请求，也不依赖本机 `~/.config` 状态；其中包含一组「同一 spec 下同步与异步发出的 JSON 报文完全一致」的一致性用例。
+共 **122** 个用例（同步 60 + 异步 24 + 日志 38），全部基于 `httpx.MockTransport` 与临时目录中的 YAML，不发起真实网络请求，也不依赖本机 `~/.config` 状态；其中包含「同一 spec 下同步与异步发出的 JSON 报文完全一致」的一致性用例，以及多语言渲染、脱敏、日志层级、`dictConfig` 可用性等日志用例。
