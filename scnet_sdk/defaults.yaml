@@ -1,0 +1,56 @@
+# =============================================================================
+# 类库系统态配置（随包发布，只读）
+#
+# 本文件由 scnet_sdk.config 在导入时加载，定义接口地址、路径、超时与状态集合
+# 等「类库级」默认值。请勿修改本文件：本地覆盖请使用用户态配置
+# （./scnet.yaml、~/.config/scnet/scnet.yaml 或 SCNET_CONFIG 指定的文件），
+# 环境变量与代码传参的优先级高于本文件。
+#
+# 优先级（低 -> 高）：
+#   代码内置默认值 < 本文件 < 用户态 YAML < SCNET_* 环境变量 < 代码传参
+# =============================================================================
+
+# 认证与授权区域接口
+endpoints:
+  # 获取访问凭证（POST，AK/SK 签名）
+  token_url: https://api.scnet.cn/api/user/v3/tokens
+  # 获取授权区域（GET，返回 hpcUrls / efileUrls / aiUrls 等）
+  center_url: https://www.scnet.cn/ac/openapi/v2/center
+
+# 容器接口路径，拼接在 ai_url（形如 https://<host>/ai）之后
+paths:
+  resources: /openapi/v2/instance-service/resources
+  task: /openapi/v2/instance-service/task
+  execute_script: /openapi/v2/instance-service/task/actions/execute-script
+  detail: /openapi/v2/instance-service/{container_id}/detail
+
+# 超时（秒）
+timeouts:
+  # 单次 HTTP 请求超时
+  request: 30.0
+  # 等待容器进入运行态的总时长上限
+  wait: 1800.0
+  # 状态轮询间隔
+  poll_interval: 5.0
+
+# 容器状态集合（大小写不敏感匹配）
+#
+# 官方开放 API 文档未给出 status 的完整英文枚举，示例中只出现过 Waiting；
+# 控制台帮助文档描述的 6 种状态为：等待 / 部署 / 运行 / 完成 / 失败 / 停止。
+# 若线上返回值与下列默认值不同，请在用户态配置中覆盖。
+statuses:
+  running:
+    - running
+  terminal:
+    - finished
+    - complete
+    - completed
+    - success
+    - succeeded
+    - failed
+    - failure
+    - error
+    - stopped
+    - stop
+    - canceled
+    - cancelled

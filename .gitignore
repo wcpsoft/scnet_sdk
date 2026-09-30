@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+# 用户态配置含凭证，不要提交
+scnet.yaml
+scnet.yml
